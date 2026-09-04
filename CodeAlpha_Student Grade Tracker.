@@ -1,0 +1,635 @@
+import javax.swing.*;
+import javax.swing.border.EmptyBorder;
+import javax.swing.event.DocumentEvent;
+import javax.swing.event.DocumentListener;
+import javax.swing.table.DefaultTableModel;
+import javax.swing.table.TableRowSorter;
+import java.awt.*;
+import java.util.*;
+import java.util.List;
+
+/**
+ * Single-file Student Grade Tracker application.
+ * How to compile: javac StudentGradeTracker.java
+ * How to run GUI: java StudentGradeTracker
+ * How to run CLI: java StudentGradeTracker --cli
+ */
+public class StudentGradeTracker {
+
+    public static void main(String[] args) {
+        GradeTracker tracker = new GradeTracker();
+        tracker.loadSampleData();
+
+        boolean forceCLI = false;
+        for (String arg : args) {
+            if ("--cli".equalsIgnoreCase(arg) || "-c".equalsIgnoreCase(arg)) {
+                forceCLI = true;
+                break;
+            }
+        }
+
+        if (forceCLI || GraphicsEnvironment.isHeadless()) {
+            System.out.println("Starting Student Grade Tracker in CLI mode...");
+            ConsoleUI consoleUI = new ConsoleUI(tracker);
+            consoleUI.start();
+        } else {
+            SwingUtilities.invokeLater(() -> {
+                StudentGradeTrackerGUI gui = new StudentGradeTrackerGUI(tracker);
+                gui.setVisible(true);
+            });
+        }
+    }
+
+    // =========================================================================
+    // 1. STUDENT MODEL
+    // =========================================================================
+    public static class Student {
+        private String id;
+        private String name;
+        private ArrayList<Double> grades;
+
+        public Student(String id, String name) {
+            this.id = id;
+            this.name = name;
+            this.grades = new ArrayList<>();
+        }
+
+        public String getId() { return id; }
+        public void setId(String id) { this.id = id; }
+        public String getName() { return name; }
+        public void setName(String name) { this.name = name; }
+        public ArrayList<Double> getGrades() { return new ArrayList<>(grades); }
+
+        public void addGrade(double grade) {
+            if (grade >= 0 && grade <= 100) {
+                grades.add(grade);
+            } else {
+                throw new IllegalArgumentException("Grade must be between 0 and 100.");
+            }
+        }
+
+        public int getGradeCount() { return grades.size(); }
+
+        public double calculateAverage() {
+            if (grades.isEmpty()) return 0.0;
+            double sum = 0;
+            for (double g : grades) sum += g;
+            return sum / grades.size();
+        }
+
+        public double getHighestGrade() {
+            if (grades.isEmpty()) return 0.0;
+            return Collections.max(grades);
+        }
+
+        public double getLowestGrade() {
+            if (grades.isEmpty()) return 0.0;
+            return Collections.min(grades);
+        }
+
+        public String getLetterGrade() {
+            if (grades.isEmpty()) return "N/A";
+            double avg = calculateAverage();
+            if (avg >= 90) return "A";
+            if (avg >= 80) return "B";
+            if (avg >= 70) return "C";
+            if (avg >= 60) return "D";
+            return "F";
+        }
+
+        public String getGradesFormatted() {
+            if (grades.isEmpty()) return "No grades";
+            StringBuilder sb = new StringBuilder();
+            for (int i = 0; i < grades.size(); i++) {
+                sb.append(String.format("%.1f", grades.get(i)));
+                if (i < grades.size() - 1) sb.append(", ");
+            }
+            return sb.toString();
+        }
+
+        @Override
+        public String toString() {
+            return String.format("Student[ID=%s, Name='%s', Avg=%.2f, Grade=%s]",
+                    id, name, calculateAverage(), getLetterGrade());
+        }
+    }
+
+    // =========================================================================
+    // 2. GRADE TRACKER SERVICE
+    // =========================================================================
+    public static class GradeTracker {
+        private final ArrayList<Student> students = new ArrayList<>();
+
+        public boolean addStudent(Student student) {
+            if (student == null || findStudentById(student.getId()) != null) return false;
+            students.add(student);
+            return true;
+        }
+
+        public boolean removeStudent(String studentId) {
+            Student s = findStudentById(studentId);
+            return s != null && students.remove(s);
+        }
+
+        public Student findStudentById(String id) {
+            for (Student s : students) {
+                if (s.getId().equalsIgnoreCase(id)) return s;
+            }
+            return null;
+        }
+
+        public ArrayList<Student> searchByName(String query) {
+            ArrayList<Student> result = new ArrayList<>();
+            String q = query.toLowerCase();
+            for (Student s : students) {
+                if (s.getName().toLowerCase().contains(q) || s.getId().toLowerCase().contains(q)) {
+                    result.add(s);
+                }
+            }
+            return result;
+        }
+
+        public ArrayList<Student> getStudents() { return new ArrayList<>(students); }
+        public int getStudentCount() { return students.size(); }
+
+        public double calculateClassAverage() {
+            if (students.isEmpty()) return 0.0;
+            double totalSum = 0;
+            int count = 0;
+            for (Student s : students) {
+                if (s.getGradeCount() > 0) {
+                    totalSum += s.calculateAverage();
+                    count++;
+                }
+            }
+            return count == 0 ? 0.0 : totalSum / count;
+        }
+
+        public double getHighestClassScore() {
+            double max = -1;
+            for (Student s : students) {
+                if (s.getGradeCount() > 0 && s.getHighestGrade() > max) {
+                    max = s.getHighestGrade();
+                }
+            }
+            return max == -1 ? 0.0 : max;
+        }
+
+        public double getLowestClassScore() {
+            double min = Double.MAX_VALUE;
+            boolean found = false;
+            for (Student s : students) {
+                if (s.getGradeCount() > 0 && s.getLowestGrade() < min) {
+                    min = s.getLowestGrade();
+                    found = true;
+                }
+            }
+            return found ? min : 0.0;
+        }
+
+        public List<Student> getTopPerformers() {
+            List<Student> top = new ArrayList<>();
+            double highestAvg = -1;
+            for (Student s : students) {
+                if (s.getGradeCount() > 0) {
+                    double avg = s.calculateAverage();
+                    if (avg > highestAvg) {
+                        highestAvg = avg;
+                        top.clear();
+                        top.add(s);
+                    } else if (Math.abs(avg - highestAvg) < 0.001) {
+                        top.add(s);
+                    }
+                }
+            }
+            return top;
+        }
+
+        public Map<String, Integer> getGradeDistribution() {
+            Map<String, Integer> dist = new HashMap<>();
+            dist.put("A", 0); dist.put("B", 0); dist.put("C", 0);
+            dist.put("D", 0); dist.put("F", 0); dist.put("N/A", 0);
+            for (Student s : students) {
+                String letter = s.getLetterGrade();
+                dist.put(letter, dist.getOrDefault(letter, 0) + 1);
+            }
+            return dist;
+        }
+
+        public void clearAll() { students.clear(); }
+
+        public void loadSampleData() {
+            clearAll();
+            Student s1 = new Student("S101", "Akash");
+            s1.addGrade(95.5); s1.addGrade(88.0); s1.addGrade(92.5);
+
+            Student s2 = new Student("S102", "Ram");
+            s2.addGrade(76.0); s2.addGrade(82.5); s2.addGrade(79.0);
+
+            Student s3 = new Student("S103", "Guru Prakesh");
+            s3.addGrade(62.0); s3.addGrade(58.5); s3.addGrade(65.0);
+
+            Student s4 = new Student("S104", "Aravind");
+            s4.addGrade(98.0); s4.addGrade(100.0); s4.addGrade(94.5);
+
+            Student s5 = new Student("S105", "Kumar");
+            s5.addGrade(85.0); s5.addGrade(89.5); s5.addGrade(87.0);
+
+            addStudent(s1); addStudent(s2); addStudent(s3); addStudent(s4); addStudent(s5);
+        }
+    }
+
+    // =========================================================================
+    // 3. CONSOLE INTERFACE (CLI)
+    // =========================================================================
+    public static class ConsoleUI {
+        private final GradeTracker tracker;
+        private final Scanner scanner;
+
+        public ConsoleUI(GradeTracker tracker) {
+            this.tracker = tracker;
+            this.scanner = new Scanner(System.in);
+        }
+
+        public void start() {
+            System.out.println("=================================================");
+            System.out.println("       STUDENT GRADE TRACKER SYSTEM (CLI)        ");
+            System.out.println("=================================================");
+
+            boolean running = true;
+            while (running) {
+                printMenu();
+                int choice = readIntInput("Select an option (0-7): ");
+                System.out.println();
+
+                switch (choice) {
+                    case 1 -> handleAddStudent();
+                    case 2 -> handleAddGrade();
+                    case 3 -> handleDisplaySummaryReport();
+                    case 4 -> handleDisplayClassStatistics();
+                    case 5 -> handleSearchStudent();
+                    case 6 -> handleRemoveStudent();
+                    case 7 -> tracker.loadSampleData();
+                    case 0 -> {
+                        System.out.println("Thank you for using Student Grade Tracker. Goodbye!");
+                        running = false;
+                    }
+                    default -> System.out.println("Invalid option! Please enter a number between 0 and 7.");
+                }
+                System.out.println();
+            }
+        }
+
+        private void printMenu() {
+            System.out.println("-------------------------------------------------");
+            System.out.println(" 1. Add New Student");
+            System.out.println(" 2. Add Grade to Student");
+            System.out.println(" 3. Display Summary Report (All Students)");
+            System.out.println(" 4. View Detailed Class Statistics");
+            System.out.println(" 5. Search Student");
+            System.out.println(" 6. Remove Student");
+            System.out.println(" 7. Reload Sample Data (Akash, Ram, Guru, etc.)");
+            System.out.println(" 0. Exit");
+            System.out.println("-------------------------------------------------");
+        }
+
+        private void handleAddStudent() {
+            System.out.println("--- Add New Student ---");
+            String id = readNonEmptyString("Enter Student ID: ");
+            if (tracker.findStudentById(id) != null) {
+                System.out.println("Error: Student with ID '" + id + "' already exists.");
+                return;
+            }
+            String name = readNonEmptyString("Enter Student Name: ");
+            Student student = new Student(id, name);
+            tracker.addStudent(student);
+            System.out.println("Student '" + name + "' added successfully!");
+        }
+
+        private void handleAddGrade() {
+            System.out.println("--- Add Grade ---");
+            String id = readNonEmptyString("Enter Student ID: ");
+            Student student = tracker.findStudentById(id);
+            if (student == null) {
+                System.out.println("Student not found.");
+                return;
+            }
+            double grade = readDoubleInput("Enter Grade (0-100): ");
+            try {
+                student.addGrade(grade);
+                System.out.printf("Grade %.2f added. New Average: %.2f (%s)%n",
+                        grade, student.calculateAverage(), student.getLetterGrade());
+            } catch (IllegalArgumentException e) {
+                System.out.println("Error: " + e.getMessage());
+            }
+        }
+
+        private void handleDisplaySummaryReport() {
+            System.out.println("=========================================================================================");
+            System.out.println("                                STUDENT SUMMARY REPORT                                   ");
+            System.out.println("=========================================================================================");
+            List<Student> list = tracker.getStudents();
+            if (list.isEmpty()) {
+                System.out.println("No student records found.");
+                return;
+            }
+            System.out.printf("%-10s | %-20s | %-8s | %-8s | %-8s | %-6s | %s%n",
+                    "ID", "Name", "Average", "Highest", "Lowest", "Grade", "All Grades");
+            System.out.println("-----------------------------------------------------------------------------------------");
+
+            for (Student s : list) {
+                if (s.getGradeCount() == 0) {
+                    System.out.printf("%-10s | %-20s | %-8s | %-8s | %-8s | %-6s | %s%n",
+                            s.getId(), s.getName(), "N/A", "N/A", "N/A", "N/A", "No grades");
+                } else {
+                    System.out.printf("%-10s | %-20s | %-8.2f | %-8.2f | %-8.2f | %-6s | %s%n",
+                            s.getId(), s.getName(), s.calculateAverage(),
+                            s.getHighestGrade(), s.getLowestGrade(), s.getLetterGrade(), s.getGradesFormatted());
+                }
+            }
+            System.out.println("-----------------------------------------------------------------------------------------");
+            System.out.printf("Total Students: %d | Class Average: %.2f%n", list.size(), tracker.calculateClassAverage());
+        }
+
+        private void handleDisplayClassStatistics() {
+            System.out.println("=================================================");
+            System.out.println("            CLASS ANALYTICS & METRICS            ");
+            System.out.println("=================================================");
+            System.out.printf("Total Enrolled Students : %d%n", tracker.getStudentCount());
+            System.out.printf("Overall Class Average   : %.2f%n", tracker.calculateClassAverage());
+            System.out.printf("Highest Score in Class  : %.2f%n", tracker.getHighestClassScore());
+            System.out.printf("Lowest Score in Class   : %.2f%n", tracker.getLowestClassScore());
+
+            System.out.println("\n--- Top Performer(s) ---");
+            for (Student s : tracker.getTopPerformers()) {
+                System.out.printf(" - %s (%s) with Average: %.2f (%s)%n", s.getName(), s.getId(), s.calculateAverage(), s.getLetterGrade());
+            }
+
+            System.out.println("\n--- Letter Grade Distribution ---");
+            Map<String, Integer> dist = tracker.getGradeDistribution();
+            for (String letter : new String[]{"A", "B", "C", "D", "F"}) {
+                int count = dist.getOrDefault(letter, 0);
+                System.out.printf(" Grade %-3s : %2d  %s%n", letter, count, "#".repeat(count));
+            }
+        }
+
+        private void handleSearchStudent() {
+            String query = readNonEmptyString("Enter Student ID or Name: ");
+            List<Student> results = tracker.searchByName(query);
+            if (results.isEmpty()) {
+                System.out.println("No matching students found.");
+            } else {
+                for (Student s : results) System.out.println(" - " + s);
+            }
+        }
+
+        private void handleRemoveStudent() {
+            String id = readNonEmptyString("Enter Student ID to remove: ");
+            if (tracker.removeStudent(id)) {
+                System.out.println("Student removed.");
+            } else {
+                System.out.println("Student not found.");
+            }
+        }
+
+        private int readIntInput(String prompt) {
+            while (true) {
+                System.out.print(prompt);
+                if (!scanner.hasNextLine()) return 0;
+                try { return Integer.parseInt(scanner.nextLine().trim()); }
+                catch (NumberFormatException e) { System.out.println("Please enter a valid integer."); }
+            }
+        }
+
+        private double readDoubleInput(String prompt) {
+            while (true) {
+                System.out.print(prompt);
+                if (!scanner.hasNextLine()) return 0.0;
+                try { return Double.parseDouble(scanner.nextLine().trim()); }
+                catch (NumberFormatException e) { System.out.println("Please enter a valid number."); }
+            }
+        }
+
+        private String readNonEmptyString(String prompt) {
+            while (true) {
+                System.out.print(prompt);
+                if (!scanner.hasNextLine()) return "";
+                String s = scanner.nextLine().trim();
+                if (!s.isEmpty()) return s;
+            }
+        }
+    }
+
+    // =========================================================================
+    // 4. DESKTOP GUI INTERFACE (SWING)
+    // =========================================================================
+    public static class StudentGradeTrackerGUI extends JFrame {
+        private final GradeTracker tracker;
+        private DefaultTableModel tableModel;
+        private JTable studentTable;
+        private TableRowSorter<DefaultTableModel> rowSorter;
+
+        private JLabel lblTotalStudents;
+        private JLabel lblClassAverage;
+        private JLabel lblHighestGrade;
+        private JLabel lblLowestGrade;
+        private JLabel lblGradeDistribution;
+        private JTextField txtSearch;
+
+        public StudentGradeTrackerGUI(GradeTracker tracker) {
+            this.tracker = tracker;
+            try { UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName()); } catch (Exception ignored) {}
+
+            setTitle("Student Grade Tracker - Desktop GUI");
+            setSize(1000, 650);
+            setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+            setLocationRelativeTo(null);
+
+            initComponents();
+            refreshData();
+        }
+
+        private void initComponents() {
+            JPanel mainPanel = new JPanel(new BorderLayout(10, 10));
+            mainPanel.setBorder(new EmptyBorder(12, 12, 12, 12));
+            mainPanel.setBackground(new Color(245, 247, 250));
+
+            // Stats Cards Header
+            JPanel statsPanel = new JPanel(new GridLayout(1, 4, 12, 0));
+            statsPanel.setOpaque(false);
+            lblTotalStudents = new JLabel("0", SwingConstants.CENTER);
+            lblClassAverage = new JLabel("0.00", SwingConstants.CENTER);
+            lblHighestGrade = new JLabel("0.00", SwingConstants.CENTER);
+            lblLowestGrade = new JLabel("0.00", SwingConstants.CENTER);
+
+            statsPanel.add(createCard("Total Students", lblTotalStudents, new Color(41, 128, 185)));
+            statsPanel.add(createCard("Class Average", lblClassAverage, new Color(39, 174, 96)));
+            statsPanel.add(createCard("Highest Score", lblHighestGrade, new Color(142, 68, 173)));
+            statsPanel.add(createCard("Lowest Score", lblLowestGrade, new Color(211, 84, 0)));
+
+            mainPanel.add(statsPanel, BorderLayout.NORTH);
+
+            // Table Panel
+            JPanel tablePanel = new JPanel(new BorderLayout(8, 8));
+            tablePanel.setOpaque(false);
+
+            JPanel searchPanel = new JPanel(new BorderLayout(8, 0));
+            searchPanel.setOpaque(false);
+            JLabel searchLbl = new JLabel("Search Roster: ");
+            searchLbl.setFont(new Font("Segoe UI", Font.BOLD, 13));
+
+            txtSearch = new JTextField();
+            txtSearch.getDocument().addDocumentListener(new DocumentListener() {
+                public void insertUpdate(DocumentEvent e) { filterTable(); }
+                public void removeUpdate(DocumentEvent e) { filterTable(); }
+                public void changedUpdate(DocumentEvent e) { filterTable(); }
+            });
+
+            lblGradeDistribution = new JLabel("Distribution: A:0 | B:0 | C:0 | D:0 | F:0");
+            lblGradeDistribution.setFont(new Font("Segoe UI", Font.ITALIC, 12));
+
+            searchPanel.add(searchLbl, BorderLayout.WEST);
+            searchPanel.add(txtSearch, BorderLayout.CENTER);
+            searchPanel.add(lblGradeDistribution, BorderLayout.EAST);
+            tablePanel.add(searchPanel, BorderLayout.NORTH);
+
+            String[] columns = {"ID", "Student Name", "Grades Count", "Average", "Highest", "Lowest", "Letter Grade", "All Grades"};
+            tableModel = new DefaultTableModel(columns, 0) {
+                @Override
+                public boolean isCellEditable(int r, int c) { return false; }
+            };
+
+            studentTable = new JTable(tableModel);
+            studentTable.setFont(new Font("Segoe UI", Font.PLAIN, 13));
+            studentTable.setRowHeight(26);
+            rowSorter = new TableRowSorter<>(tableModel);
+            studentTable.setRowSorter(rowSorter);
+
+            JScrollPane scrollPane = new JScrollPane(studentTable);
+            scrollPane.setBorder(BorderFactory.createTitledBorder("Student Roster & Performance Summary"));
+            tablePanel.add(scrollPane, BorderLayout.CENTER);
+
+            mainPanel.add(tablePanel, BorderLayout.CENTER);
+
+            // Buttons Panel
+            JPanel controlPanel = new JPanel(new FlowLayout(FlowLayout.CENTER, 10, 5));
+            controlPanel.setOpaque(false);
+
+            JButton btnAddStudent = new JButton("Add Student");
+            JButton btnAddGrade = new JButton("Add Grade");
+            JButton btnDeleteStudent = new JButton("Delete Student");
+            JButton btnSampleData = new JButton("Reset Sample Data");
+
+            btnAddStudent.addActionListener(e -> onAddStudent());
+            btnAddGrade.addActionListener(e -> onAddGrade());
+            btnDeleteStudent.addActionListener(e -> onDeleteStudent());
+            btnSampleData.addActionListener(e -> {
+                tracker.loadSampleData();
+                refreshData();
+            });
+
+            controlPanel.add(btnAddStudent);
+            controlPanel.add(btnAddGrade);
+            controlPanel.add(btnDeleteStudent);
+            controlPanel.add(btnSampleData);
+
+            mainPanel.add(controlPanel, BorderLayout.SOUTH);
+
+            setContentPane(mainPanel);
+        }
+
+        private JPanel createCard(String title, JLabel valueLabel, Color accentColor) {
+            JPanel card = new JPanel(new BorderLayout(5, 5));
+            card.setBackground(Color.WHITE);
+            card.setBorder(BorderFactory.createCompoundBorder(
+                    BorderFactory.createLineBorder(new Color(220, 224, 230), 1, true),
+                    new EmptyBorder(10, 15, 10, 15)
+            ));
+            JLabel titleLbl = new JLabel(title);
+            titleLbl.setFont(new Font("Segoe UI", Font.BOLD, 12));
+            titleLbl.setForeground(new Color(120, 130, 140));
+
+            valueLabel.setFont(new Font("Segoe UI", Font.BOLD, 22));
+            valueLabel.setForeground(accentColor);
+
+            card.add(titleLbl, BorderLayout.NORTH);
+            card.add(valueLabel, BorderLayout.CENTER);
+            return card;
+        }
+
+        private void filterTable() {
+            String text = txtSearch.getText().trim();
+            if (text.isEmpty()) rowSorter.setRowFilter(null);
+            else rowSorter.setRowFilter(RowFilter.regexFilter("(?i)" + text));
+        }
+
+        public void refreshData() {
+            tableModel.setRowCount(0);
+            for (Student s : tracker.getStudents()) {
+                tableModel.addRow(new Object[]{
+                        s.getId(), s.getName(), s.getGradeCount(),
+                        Math.round(s.calculateAverage() * 100.0) / 100.0,
+                        Math.round(s.getHighestGrade() * 100.0) / 100.0,
+                        Math.round(s.getLowestGrade() * 100.0) / 100.0,
+                        s.getLetterGrade(), s.getGradesFormatted()
+                });
+            }
+
+            lblTotalStudents.setText(String.valueOf(tracker.getStudentCount()));
+            lblClassAverage.setText(String.format("%.2f", tracker.calculateClassAverage()));
+            lblHighestGrade.setText(String.format("%.2f", tracker.getHighestClassScore()));
+            lblLowestGrade.setText(String.format("%.2f", tracker.getLowestClassScore()));
+
+            Map<String, Integer> dist = tracker.getGradeDistribution();
+            lblGradeDistribution.setText(String.format("Distribution: A:%d | B:%d | C:%d | D:%d | F:%d",
+                    dist.get("A"), dist.get("B"), dist.get("C"), dist.get("D"), dist.get("F")));
+        }
+
+        private void onAddStudent() {
+            JTextField txtId = new JTextField();
+            JTextField txtName = new JTextField();
+            Object[] message = { "Student ID:", txtId, "Student Name:", txtName };
+            int option = JOptionPane.showConfirmDialog(this, message, "Add Student", JOptionPane.OK_CANCEL_OPTION);
+            if (option == JOptionPane.OK_OPTION) {
+                String id = txtId.getText().trim();
+                String name = txtName.getText().trim();
+                if (!id.isEmpty() && !name.isEmpty() && tracker.findStudentById(id) == null) {
+                    tracker.addStudent(new Student(id, name));
+                    refreshData();
+                }
+            }
+        }
+
+        private void onAddGrade() {
+            int row = studentTable.getSelectedRow();
+            if (row == -1) {
+                JOptionPane.showMessageDialog(this, "Select a student from table first.");
+                return;
+            }
+            int modelRow = studentTable.convertRowIndexToModel(row);
+            String id = (String) tableModel.getValueAt(modelRow, 0);
+            Student s = tracker.findStudentById(id);
+            if (s != null) {
+                String gradeStr = JOptionPane.showInputDialog(this, "Enter grade (0-100) for " + s.getName() + ":");
+                if (gradeStr != null && !gradeStr.trim().isEmpty()) {
+                    try {
+                        s.addGrade(Double.parseDouble(gradeStr.trim()));
+                        refreshData();
+                    } catch (Exception ex) {
+                        JOptionPane.showMessageDialog(this, "Invalid grade value.");
+                    }
+                }
+            }
+        }
+
+        private void onDeleteStudent() {
+            int row = studentTable.getSelectedRow();
+            if (row != -1) {
+                int modelRow = studentTable.convertRowIndexToModel(row);
+                String id = (String) tableModel.getValueAt(modelRow, 0);
+                tracker.removeStudent(id);
+                refreshData();
+            }
+        }
+    }
+}
